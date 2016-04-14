@@ -38,7 +38,11 @@
 
     (teardown! [_ test node]
       (c/su
-        (info node "Nothing to do")))))
+        (info node "Nothing to do")))
+
+    db/LogFiles
+    (log-files [_ test node]
+      ["/var/log/syslog"])))
 
 (def queue "jepsen.queue")
 
