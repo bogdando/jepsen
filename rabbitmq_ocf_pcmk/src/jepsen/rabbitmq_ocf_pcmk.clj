@@ -77,7 +77,7 @@
       (with-ch [ch conn]
         ; Initialize queue
         (lq/declare ch queue
-                    :durable     true
+                    :durable     false
                     :auto-delete false
                     :exclusive   false))
 
@@ -102,8 +102,8 @@
                    (lb/publish ch "" queue
                                (codec/encode (:value op))
                                :content-type  "application/edn"
-                               :mandatory     true
-                               :persistent    true)
+                               :mandatory     false
+                               :persistent    false))
 
                    ; Block until message acknowledged
                    (if (lco/wait-for-confirms ch 5000)
@@ -138,7 +138,7 @@
     (let [conn (rmq/connect {:host (name node)})]
       (with-ch [ch conn]
         (lq/declare ch "jepsen.semaphore"
-                    :durable true
+                    :durable false
                     :auto-delete false
                     :exclusive false)
 
