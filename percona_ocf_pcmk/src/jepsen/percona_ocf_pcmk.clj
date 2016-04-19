@@ -30,12 +30,6 @@
 
 (def dir "/var/lib/mysql")
 
-(defn stop!
-  "Stops sql daemon."
-  [node]
-  (info node "stopping mysqld")
-  (meh (cu/grepkill! "mysqld")))
-
 (defn eval!
   "Evals a mysql string from the command line."
   [s]
@@ -46,7 +40,7 @@
   [node]
   {:classname   "org.mariadb.jdbc.Driver"
    :subprotocol "mariadb"
-   :subname     (str "//" (name node) ":3306/mysql")
+   :subname     (str "//" (name node) ":3306/jepsen")
    :user        "root"
    :password    "root"})
 
@@ -57,22 +51,16 @@
   (eval! (str "GRANT ALL PRIVILEGES ON jepsen.* "
               "TO 'root'@'%' IDENTIFIED BY 'root';")))
 
-(defn db
+(def db
   "Sets up and tears down Galera."
-  [_]
   (reify db/DB
     (setup! [_ test node]
       (jepsen/synchronize test)
-      (setup-db! node)
-
-      (info node "Install complete")
-      (Thread/sleep 5000))
+      (setup-db! node))
 
     (teardown! [_ test node]
       (c/su
-        (stop! node)
-        (apply c/exec :truncate :-c :--size 0 log-files))
-        (c/exec :rm :-rf dir))
+        (eval! "drop database if exists jepsen;")))
 
     db/LogFiles
     (log-files [_ test node] log-files)))
@@ -157,7 +145,7 @@
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
-(defrecord BankClient [node n starting-balance lock-type in-place?]
+(defrecord BankClient [node n starting-balance lock-type in-place? mode]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (conn-spec (first (:nodes test)))]
@@ -175,7 +163,7 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (with-txn op [c (first (:nodes test))]
+    (with-txn op [c (mode (:nodes test))]
       (try
         (case (:f op)
           :read (->> (j/query c [(str "select * from accounts" lock-type)])
@@ -217,9 +205,9 @@
 
 (defn bank-client
   "Simulates bank account transfers between n accounts, each starting with
-  starting-balance."
-  [n starting-balance lock-type in-place?]
-  (BankClient. nil n starting-balance lock-type in-place?))
+  starting-balance"
+  [n starting-balance lock-type in-place? mode]
+  (BankClient. nil n starting-balance lock-type in-place? mode))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -270,17 +258,18 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [n initial-balance lock-type in-place?]
+  [n initial-balance lock-type in-place? mode]
   (basic-test
     {:name "bank"
+     :db db
      :concurrency 20
      :model  {:n n :total (* n initial-balance)}
-     :client (bank-client n initial-balance lock-type in-place?)
+     :client (bank-client n initial-balance lock-type in-place? mode)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
-                       (gen/time-limit 100))
+                       (gen/time-limit 200))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 10)
                   (gen/clients (gen/once bank-read)))
