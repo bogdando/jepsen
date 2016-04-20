@@ -272,8 +272,8 @@
                        (with-nemesis)
                        (gen/time-limit 200))
                   (gen/log "waiting for quiescence")
-                  (gen/sleep 10)
-                  (gen/clients (gen/once bank-read)))
+                  (gen/sleep 180)
+                  (gen/clients (gen/each (gen/once bank-read))))
      ;:nemesis (nemesis/partition-random-halves)
      :nemesis nemesis/noop
      :checker (checker/compose
