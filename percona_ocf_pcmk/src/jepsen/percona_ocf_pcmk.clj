@@ -269,10 +269,12 @@
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
+                       (with-nemesis)
                        (gen/time-limit 200))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 10)
                   (gen/clients (gen/once bank-read)))
+     ;:nemesis (nemesis/partition-random-halves)
      :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
