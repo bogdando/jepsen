@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all]
             [jepsen.core :refer [run!]]
             [jepsen.percona_ocf_pcmk :refer :all]
-            [jepsen.percona.dirty-reads :as dirty-reads]))
+            [jepsen.percona_ocf_pcmk.dirty-reads :as dirty-reads]))
 
 ;(deftest sets-test'
 ;  (is (:valid? (:results (run! (sets-test))))))
@@ -15,5 +15,5 @@
 (deftest bank-test-multi
   (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false rand-nth))))))
 
-;(deftest dirty-reads-test
-;  (is (:valid? (:results (run! (dirty-reads/test- 4))))))
+(deftest dirty-reads-test
+  (is (:valid? (:results (run! (dirty-reads/test- 4))))))
