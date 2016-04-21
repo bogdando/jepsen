@@ -1,4 +1,4 @@
-(ns jepsen.percona.dirty-reads
+(ns jepsen.percona_ocf_pcmk.dirty-reads
   "Dirty read analysis for Mariadb Galera Cluster.
 
   In this test, writers compete to set every row in a table to some unique
@@ -12,7 +12,6 @@
             [knossos.op :as op]
             [jepsen [client :as client]
              [core :as jepsen]
-             [db :as db]
              [tests :as tests]
              [control :as c :refer [|]]
              [checker :as checker]
@@ -105,14 +104,15 @@
                  gen/seq))
 
 (defn test-
-  [version n]
+  [n]
   (percona/basic-test
     {:name "dirty reads"
      :concurrency 50
-     :version version
      :client (client n)
+     :db percona/db
      :generator (->> (gen/mix [reads writes])
                      gen/clients
+                     (percona/with-nemesis)
                      (gen/time-limit 1000))
      :nemesis nemesis/noop
      :checker (checker/compose
