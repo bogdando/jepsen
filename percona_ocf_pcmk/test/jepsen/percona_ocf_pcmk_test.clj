@@ -16,4 +16,4 @@
   (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false rand-nth))))))
 
 (deftest dirty-reads-test
-  (is (:valid? (:results (run! (dirty-reads/test- 4))))))
+  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth))))))
