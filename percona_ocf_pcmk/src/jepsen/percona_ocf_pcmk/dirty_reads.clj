@@ -25,7 +25,7 @@
             [clojure.java.jdbc :as j]))
 
 
-(defrecord Client [node n]
+(defrecord Client [node n mode]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (percona/conn-spec node)]
@@ -47,7 +47,7 @@
     (timeout 5000 (assoc ~op :type :info, :value :timed-out)
       (percona/with-error-handling op
         (percona/with-txn-aborts op
-          (j/with-db-transaction [c (percona/conn-spec node)
+          (j/with-db-transaction [c (percona/conn-spec (mode (:nodes test)))
                                   :isolation :serializable]
             (try
               (case (:f op)
@@ -66,8 +66,8 @@
   (teardown! [_ test]))
 
 (defn client
-  [n]
-  (Client. nil n))
+  [n mode]
+  (Client. nil n mode))
 
 (defn checker
   "We're looking for a failed transaction whose value became visible to some
@@ -104,16 +104,21 @@
                  gen/seq))
 
 (defn test-
-  [n]
+  [n mode]
   (percona/basic-test
     {:name "dirty reads"
      :concurrency 50
-     :client (client n)
+     :client (client n mode)
      :db percona/db
-     :generator (->> (gen/mix [reads writes])
-                     gen/clients
-                     (percona/with-nemesis)
-                     (gen/time-limit 1000))
+     :generator (gen/phases
+                  (->> (gen/mix [reads writes])
+                       (gen/clients)
+                       (percona/with-nemesis)
+                       (gen/time-limit 200))
+                  (gen/log "waiting for quiescence")
+                  (gen/sleep 180)
+                  (gen/clients (gen/each (gen/once reads))))
+     ;nemesis (nemesis/partition-random-halves)
      :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
