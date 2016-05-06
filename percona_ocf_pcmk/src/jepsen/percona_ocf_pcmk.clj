@@ -267,7 +267,6 @@
      :client (bank-client n initial-balance lock-type in-place? mode)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
-                       (gen/clients)
                        (gen/stagger 1/10)
                        (with-nemesis)
                        (gen/time-limit 200))

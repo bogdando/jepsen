@@ -112,7 +112,6 @@
      :db percona/db
      :generator (gen/phases
                   (->> (gen/mix [reads writes])
-                       (gen/clients)
                        (percona/with-nemesis)
                        (gen/time-limit 200))
                   (gen/log "waiting for quiescence")
