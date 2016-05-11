@@ -119,6 +119,4 @@
                   (gen/clients (gen/each (gen/once reads))))
      ;nemesis (nemesis/partition-random-halves)
      :nemesis nemesis/noop
-     :checker (checker/compose
-                {:perf (checker/perf)
-                 :dirty-reads (checker)})}))
+     :checker (checker/compose {:dirty-reads (checker)})}))

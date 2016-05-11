@@ -15,32 +15,32 @@
             [jepsen.store     :as store]
             [jepsen.report    :as report]))
 
-;(deftest mutex-test
-;  (let [test (run!
-;               (assoc
-;                 noop-test
-;                 :name      "rabbitmq-mutex"
-;                 :db        db
-;                 :client    (mutex)
-;                 :checker   (checker/compose {:html   timeline/html
-;                                              :linear checker/linearizable})
-;                 :model     (model/mutex)
-;                 :nemesis   (nemesis/partition-random-halves)
-;                 :generator (gen/phases
-;                              (->> (gen/seq
-;                                     (cycle [{:type :invoke :f :acquire}
-;                                             {:type :invoke :f :release}]))
-;                                gen/each
-;                                (gen/delay 180)
-;                                (gen/nemesis
-;                                  (gen/seq
-;                                    (cycle [(gen/sleep 5)
-;                                            {:type :info :f :start}
-;                                            (gen/sleep 100)
-;                                            {:type :info :f :stop}])))
-;                                (gen/time-limit 500)))))]
-;    (is (:valid? (:results test)))
-;    (report/linearizability (:linear (:results test)))))
+(deftest mutex-test
+  (let [test (run!
+               (assoc
+                 noop-test
+                 :name      "rabbitmq-mutex"
+                 :db        db
+                 :client    (mutex)
+                 :checker   (checker/compose {:html   timeline/html
+                                              :linear checker/linearizable})
+                 :model     (model/mutex)
+                 :nemesis   (nemesis/partition-random-halves)
+                 :generator (gen/phases
+                              (->> (gen/seq
+                                     (cycle [{:type :invoke :f :acquire}
+                                             {:type :invoke :f :release}]))
+                                gen/each
+                                (gen/delay 180)
+                                (gen/nemesis
+                                  (gen/seq
+                                    (cycle [(gen/sleep 5)
+                                            {:type :info :f :start}
+                                            (gen/sleep 100)
+                                            {:type :info :f :stop}])))
+                                (gen/time-limit 500)))))]
+    (is (:valid? (:results test)))
+    (report/linearizability (:linear (:results test)))))
 
 (deftest rabbit-test
   (let [test (run!
@@ -59,15 +59,15 @@
                                     (gen/delay 1/10)
                                     (gen/nemesis
                                       (gen/seq
-                                        (cycle [(gen/sleep 60)
+                                        (cycle [(gen/sleep 180)
                                                 {:type :info :f :start}
-                                                (gen/sleep 60)
+                                                (gen/sleep 180)
                                                 {:type :info :f :stop}])))
-                                    (gen/time-limit 360))
+                                    (gen/time-limit 700))
                                (gen/nemesis
                                  (gen/once {:type :info, :f :stop}))
                                (gen/log "waiting for recovery")
-                               (gen/sleep 60)
+                               (gen/sleep 120)
                                (gen/clients
                                  (gen/each
                                    (gen/once {:type :invoke

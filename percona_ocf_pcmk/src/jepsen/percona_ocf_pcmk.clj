@@ -275,6 +275,4 @@
                   (gen/clients (gen/each (gen/once bank-read))))
      ;:nemesis (nemesis/partition-random-halves)
      :nemesis nemesis/noop
-     :checker (checker/compose
-                {:perf (checker/perf)
-                 :bank (bank-checker)})}))
+     :checker (checker/compose {:bank (bank-checker)})}))
