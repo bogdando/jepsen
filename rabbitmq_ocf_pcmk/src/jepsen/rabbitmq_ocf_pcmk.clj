@@ -17,7 +17,8 @@
             [langohr.confirm       :as lco]
             [langohr.queue         :as lq]
             [langohr.exchange      :as le]
-            [langohr.basic         :as lb])
+            [langohr.basic         :as lb]
+            [slingshot.slingshot   :refer [try+]])
   (:import (com.rabbitmq.client AlreadyClosedException
                                 ShutdownSignalException)))
 
@@ -67,19 +68,21 @@
   `(let [~ch (lch/open ~conn)]
      (try ~@body
           (finally
-            (try (rmq/close ~ch)
-                 (catch AlreadyClosedException _#))))))
+            (meh (rmq/close ~ch))))))
 
 (defrecord QueueClient [conn]
   client/Client
   (setup! [_ test node]
-    (let [conn (rmq/connect {:host (name node)})]
+    (let [conn (rmq/connect
+                 {:host (name node)
+                  :username "test" :password "test"
+                  :automatically-recover false})]
       (with-ch [ch conn]
         ; Initialize queue
         (lq/declare ch queue
-                    :durable     false
-                    :auto-delete false
-                    :exclusive   false))
+                    {:durable     false
+                     :auto-delete false
+                     :exclusive   false}))
 
       ; Return client
       (QueueClient. conn)))
@@ -93,39 +96,58 @@
     (meh (rmq/close conn)))
 
   (invoke! [this test op]
-    (with-ch [ch conn]
-      (case (:f op)
-        :enqueue (do
-                   (lco/select ch) ; Use confirmation tracking
+    (let [fail (if(= :drain (:f op))
+                 :fail
+                 :info)]
+      (try+ (with-ch [ch conn]
+        (case (:f op)
+          :enqueue (do
+                     (lco/select ch) ; Use confirmation tracking
 
-                   ; Empty string is the default exhange
-                   (lb/publish ch "" queue
-                               (codec/encode (:value op))
-                               :content-type  "application/edn"
-                               :mandatory     false
-                               :persistent    false))
+                     ; Empty string is the default exhange
+                     (lb/publish ch "" queue
+                                 (codec/encode (:value op))
+                                 {:content-type  "application/edn"
+                                  :mandatory     false
+                                  :persistent    false})
 
-                   ; Block until message acknowledged
-                   (if (lco/wait-for-confirms ch 5000)
-                     (assoc op :type :ok)
-                     (assoc op :type :fail)))
+                     ; Block until message acknowledged
+                     (if (lco/wait-for-confirms ch 5000)
+                       (assoc op :type :ok)
+                       (assoc op :type :fail)))
 
-        :dequeue (dequeue! ch op)
+          :dequeue (dequeue! ch op)
 
-        :drain   (do
-                   ; Note that this does more dequeues than strictly necessary
-                   ; owing to lazy sequence chunking.
-                   (->> (repeat op)                  ; Explode drain into
-                        (map #(assoc % :f :dequeue)) ; infinite dequeues, then
-                        (map (partial dequeue! ch))  ; dequeue something
-                        (take-while op/ok?)  ; as long as stuff arrives,
-                        (interleave (repeat op))     ; interleave with invokes
-                        (drop 1)                     ; except the initial one
-                        (map (fn [completion]
-                               (log-op completion)
-                               (core/conj-op! test completion)))
-                        dorun)
-                   (assoc op :type :ok :value :exhausted))))))
+          :drain   (do
+                     ; Note that this does more dequeues than strictly necessary
+                     ; owing to lazy sequence chunking.
+                     (->> (repeat op)                  ; Explode drain into
+                          (map #(assoc % :f :dequeue)) ; infinite dequeues, then
+                          (map (partial dequeue! ch))  ; dequeue something
+                          (take-while op/ok?)  ; as long as stuff arrives,
+                          (interleave (repeat op))     ; interleave with invokes
+                          (drop 1)                     ; except the initial one
+                          (map (fn [completion]
+                                 (log-op completion)
+                                 (core/conj-op! test completion)))
+                          dorun)
+                     (assoc op :type :ok :value :exhausted))))
+
+      ; Failure modes
+      (catch java.net.SocketTimeoutException e
+        (assoc op :type fail :value :timeout))
+
+      (catch AlreadyClosedException e
+        (assoc op :type fail :value :channel-closed))
+
+      (catch (and (instance? clojure.lang.ExceptionInfo %)) e
+        (assoc op :type fail :value (:cause e)))
+
+      (catch (and (:errorCode %) (:message %)) e
+        (assoc op :type fail :value (:cause e)))
+
+      (catch Exception e
+            (assoc op :type fail :value (:cause e)))))))
 
 (defn queue-client [] (QueueClient. nil))
 
@@ -135,12 +157,15 @@
 (defrecord Semaphore [enqueued? conn ch tag]
   client/Client
   (setup! [_ test node]
-    (let [conn (rmq/connect {:host (name node)})]
+    (let [conn (rmq/connect
+                 {:host (name node)
+                  :username "test" :password "test"
+                  :automatically-recover false})]
       (with-ch [ch conn]
         (lq/declare ch "jepsen.semaphore"
-                    :durable false
-                    :auto-delete false
-                    :exclusive false)
+                    {:durable false
+                     :auto-delete false
+                     :exclusive false})
 
         ; Enqueue a single message
         (when (compare-and-set! enqueued? false true)
@@ -168,7 +193,7 @@
                    (assoc op :type :fail :value :already-held)
 
                    (timeout 5000 (assoc op :type :fail :value :timeout)
-                      (try
+                      (try+
                         ; Get a message but don't acknowledge it
                         (let [dtag (-> (lb/get @ch "jepsen.semaphore" false)
                                        first
@@ -180,11 +205,14 @@
 
                         (catch ShutdownSignalException e
                           (meh (reset! ch (lch/open conn)))
-                          (assoc op :type :fail :value (.getMessage e)))
+                          (assoc op :type :fail :value (:cause e)))
 
                         (catch AlreadyClosedException e
                           (meh (reset! ch (lch/open conn)))
-                          (assoc op :type :fail :value :channel-closed))))))
+                          (assoc op :type :fail :value :channel-closed))
+
+                        (catch Exception e
+                          (assoc op :type :info :value (:cause e)))))))
 
       :release (locking tag
                  (if-not @tag
@@ -192,7 +220,7 @@
                    (timeout 5000 (assoc op :type :ok :value :timeout)
                             (let [t @tag]
                               (reset! tag nil)
-                              (try
+                              (try+
                                 ; We're done now--we try to reject but it
                                 ; doesn't matter if we succeed or not.
                                 (lb/reject @ch t true)
@@ -203,8 +231,9 @@
                                   (assoc op :type :ok :value :channel-closed))
 
                                 (catch ShutdownSignalException e
-                                  (assoc op
-                                         :type :ok
-                                         :value (.getMessage e)))))))))))
+                                  (assoc op :type :ok :value (:cause e)))
+
+                                (catch Exception e
+                                  (assoc op :type :info :value (:cause e)))))))))))
 
 (defn mutex [] (Semaphore. (atom false) nil nil nil))
