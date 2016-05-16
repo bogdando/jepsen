@@ -10,5 +10,6 @@
                  [jepsen "0.1.1-SNAPSHOT"]
                  [jepsen.galera "0.1.0-SNAPSHOT"]
                  [honeysql "0.6.1"]
+                 [slingshot "0.12.2"]
                  [org.clojure/java.jdbc "0.4.1"]
                  [org.mariadb.jdbc/mariadb-java-client "1.2.0"]])

@@ -9,11 +9,11 @@
 
 ; the test for a single node for all writes and reads
 (deftest bank-test-single
-  (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false first))))))
+  (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false first :serializable))))))
 
 ; the test for a "multi master" writes and reads
 (deftest bank-test-multi
-  (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false rand-nth))))))
+  (is (:valid? (:results (run! (bank-test 2 10 " FOR UPDATE" false rand-nth :serializable))))))
 
 (deftest dirty-reads-test
-  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth))))))
+  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth :serializable))))))
