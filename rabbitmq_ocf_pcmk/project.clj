@@ -8,4 +8,5 @@
   :local-repo "resources"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.novemberain/langohr "3.5.1" ]
+                 [slingshot "0.12.2"]
                  [jepsen "0.1.1-SNAPSHOT"]])

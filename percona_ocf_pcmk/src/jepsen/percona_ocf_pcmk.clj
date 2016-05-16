@@ -18,6 +18,7 @@
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [clojure.java.jdbc :as j]
+            [slingshot.slingshot   :refer [try+]]
             [honeysql [core :as sql]
                       [helpers :as h]]))
 
@@ -113,12 +114,12 @@
 (defmacro with-txn
   "Executes body in a transaction, with a timeout, automatically retrying
   conflicts and handling common errors."
-  [op [c node] & body]
-  `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
+  [ti-level op [c node] & body]
+  `(timeout 5000 nil
            (with-error-handling ~op
              (with-txn-retries
                (j/with-db-transaction [~c (conn-spec ~node)
-                                       :isolation :serializable]
+                                       :isolation ~ti-level]
                  (j/execute! ~c ["start transaction with consistent snapshot"])
                  ~@body)))))
 
@@ -145,7 +146,7 @@
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
-(defrecord BankClient [node n starting-balance lock-type in-place? mode]
+(defrecord BankClient [node n starting-balance lock-type in-place? mode ti-level]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (conn-spec (first (:nodes test)))]
@@ -163,51 +164,60 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (with-txn op [c (mode (:nodes test))]
-      (try
-        (case (:f op)
-          :read (->> (j/query c [(str "select * from accounts" lock-type)])
-                     (mapv :balance)
-                     (assoc op :type :ok, :value))
+    (let [fail (if (= :read (:f op))
+                 :fail
+                 :info)]
+      (with-txn ti-level op [c (mode (:nodes test))]
+        (try+
+          (case (:f op)
+            :read (->> (j/query c [(str "select * from accounts" lock-type)])
+                       (mapv :balance)
+                       (assoc op :type :ok, :value))
 
-          :transfer
-          (let [{:keys [from to amount]} (:value op)
-                b1 (-> c
-                       (j/query [(str "select * from accounts where id = ?"
-                                      lock-type)
-                                 from]
-                         :row-fn :balance)
-                       first
-                       (- amount))
-                b2 (-> c
-                       (j/query [(str "select * from accounts where id = ?"
-                                      lock-type)
-                                 to]
-                         :row-fn :balance)
-                       first
-                       (+ amount))]
-            (cond (neg? b1)
-                  (assoc op :type :fail, :value [:negative from b1])
+            :transfer
+            (let [{:keys [from to amount]} (:value op)
+                  b1 (-> c
+                         (j/query [(str "select * from accounts where id = ?"
+                                        lock-type)
+                                   from]
+                           :row-fn :balance)
+                         first
+                         (- amount))
+                  b2 (-> c
+                         (j/query [(str "select * from accounts where id = ?"
+                                        lock-type)
+                                   to]
+                           :row-fn :balance)
+                         first
+                         (+ amount))]
+              (cond (neg? b1)
+                    (assoc op :type :fail, :value [:negative from b1])
 
-                  (neg? b2)
-                  (assoc op :type :fail, :value [:negative to b2])
+                    (neg? b2)
+                    (assoc op :type :fail, :value [:negative to b2])
 
-                  true
-                  (if in-place?
-                    (do (j/execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
-                        (j/execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
-                        (assoc op :type :ok))
-                    (do (j/update! c :accounts {:balance b1} ["id = ?" from])
-                        (j/update! c :accounts {:balance b2} ["id = ?" to])
-                        (assoc op :type :ok)))))))))
+                    true
+                    (if in-place?
+                      (do (j/execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
+                          (j/execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
+                          (assoc op :type :ok))
+                      (do (j/update! c :accounts {:balance b1} ["id = ?" from])
+                          (j/update! c :accounts {:balance b2} ["id = ?" to])
+                          (assoc op :type :ok))))))
+
+        (catch java.net.SocketTimeoutException e
+          (assoc op :type fail :value :timed-out))
+
+        (catch Exception e
+          (assoc op :type fail :value (:cause e)))))))
 
   (teardown! [_ test]))
 
 (defn bank-client
   "Simulates bank account transfers between n accounts, each starting with
   starting-balance"
-  [n starting-balance lock-type in-place? mode]
-  (BankClient. nil n starting-balance lock-type in-place? mode))
+  [n starting-balance lock-type in-place? mode ti-level]
+  (BankClient. nil n starting-balance lock-type in-place? mode ti-level))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -258,13 +268,13 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [n initial-balance lock-type in-place? mode]
+  [n initial-balance lock-type in-place? mode ti-level]
   (basic-test
     {:name "bank"
      :db db
      :concurrency 20
      :model  {:n n :total (* n initial-balance)}
-     :client (bank-client n initial-balance lock-type in-place? mode)
+     :client (bank-client n initial-balance lock-type in-place? mode ti-level)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/stagger 1/10)
@@ -273,6 +283,6 @@
                   (gen/log "waiting for quiescence")
                   (gen/sleep 180)
                   (gen/clients (gen/each (gen/once bank-read))))
-     ;:nemesis (nemesis/partition-random-halves)
-     :nemesis nemesis/noop
+     :nemesis (nemesis/partition-random-halves)
+     ;:nemesis nemesis/noop
      :checker (checker/compose {:bank (bank-checker)})}))

@@ -96,7 +96,7 @@
     (meh (rmq/close conn)))
 
   (invoke! [this test op]
-    (let [fail (if(= :drain (:f op))
+    (let [fail (if (= :drain (:f op))
                  :fail
                  :info)]
       (try+ (with-ch [ch conn]

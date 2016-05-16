@@ -22,10 +22,11 @@
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian]
+            [slingshot.slingshot   :refer [try+]]
             [clojure.java.jdbc :as j]))
 
 
-(defrecord Client [node n mode]
+(defrecord Client [node n mode ti-level]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (percona/conn-spec node)]
@@ -44,30 +45,39 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (timeout 5000 (assoc ~op :type :info, :value :timed-out)
-      (percona/with-error-handling op
-        (percona/with-txn-aborts op
-          (j/with-db-transaction [c (percona/conn-spec (mode (:nodes test)))
-                                  :isolation :serializable]
-            (try
-              (case (:f op)
-                :read (->> (j/query c ["select * from dirty"])
-                           (mapv :x)
-                           (assoc op :type :ok, :value))
+    (let [fail (if(= :read (:f op))
+                 :fail
+                 :info)]
+      (timeout 5000 (assoc ~op :type fail, :value :timed-out)
+        (percona/with-error-handling op
+          (percona/with-txn-aborts op
+            (j/with-db-transaction [c (percona/conn-spec (mode (:nodes test)))
+                                  :isolation ti-level]
+              (try+
+                (case (:f op)
+                  :read (->> (j/query c ["select * from dirty"])
+                             (mapv :x)
+                             (assoc op :type :ok, :value))
 
-                :write (let [x (:value op)
-                             order (shuffle (range n))]
-                         (doseq [i order]
-                           (j/query c ["select * from dirty where id = ?" i]))
-                         (doseq [i order]
-                           (j/update! c :dirty {:x x} ["id = ?" i]))
-                         (assoc op :type :ok)))))))))
+                  :write (let [x (:value op)
+                               order (shuffle (range n))]
+                           (doseq [i order]
+                             (j/query c ["select * from dirty where id = ?" i]))
+                           (doseq [i order]
+                             (j/update! c :dirty {:x x} ["id = ?" i]))
+                           (assoc op :type :ok)))
+
+              (catch java.net.SocketTimeoutException e
+                (assoc op :type fail :value :timed-out))
+
+              (catch Exception e
+                    (assoc op :type fail :value (:cause e))))))))))
 
   (teardown! [_ test]))
 
 (defn client
-  [n mode]
-  (Client. nil n mode))
+  [n mode ti-level]
+  (Client. nil n mode ti-level))
 
 (defn checker
   "We're looking for a failed transaction whose value became visible to some
@@ -104,11 +114,11 @@
                  gen/seq))
 
 (defn test-
-  [n mode]
+  [n mode ti-level]
   (percona/basic-test
     {:name "dirty reads"
      :concurrency 50
-     :client (client n mode)
+     :client (client n mode ti-level)
      :db percona/db
      :generator (gen/phases
                   (->> (gen/mix [reads writes])
@@ -117,6 +127,6 @@
                   (gen/log "waiting for quiescence")
                   (gen/sleep 180)
                   (gen/clients (gen/each (gen/once reads))))
-     ;nemesis (nemesis/partition-random-halves)
-     :nemesis nemesis/noop
+     :nemesis (nemesis/partition-random-halves)
+     ;:nemesis nemesis/noop
      :checker (checker/compose {:dirty-reads (checker)})}))
