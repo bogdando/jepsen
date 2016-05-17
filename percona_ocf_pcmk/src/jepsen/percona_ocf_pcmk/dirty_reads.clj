@@ -48,7 +48,7 @@
     (let [fail (if(= :read (:f op))
                  :fail
                  :info)]
-      (timeout 5000 (assoc ~op :type fail, :value :timed-out)
+      (timeout 5000 (assoc op :type fail, :value :timed-out)
         (percona/with-error-handling op
           (percona/with-txn-aborts op
             (j/with-db-transaction [c (percona/conn-spec (mode (:nodes test)))
