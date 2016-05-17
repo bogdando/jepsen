@@ -21,7 +21,7 @@
 
 ; the test against dirty reads and A5A read skews
 (deftest dirty-reads-test
-  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth :serializable))))))
+  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth "" :serializable))))))
 
 (deftest dirty-reads-test-rr
-  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth :repeatable-read))))))
+  (is (:valid? (:results (run! (dirty-reads/test- 4 rand-nth " FOR UPDATE" :repeatable-read))))))

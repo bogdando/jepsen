@@ -26,7 +26,7 @@
             [clojure.java.jdbc :as j]))
 
 
-(defrecord Client [node n mode ti-level]
+(defrecord Client [node n mode lock-type ti-level]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (percona/conn-spec node)]
@@ -55,14 +55,14 @@
                                   :isolation ti-level]
               (try+
                 (case (:f op)
-                  :read (->> (j/query c ["select * from dirty"])
+                  :read (->> (j/query c [(str "select * from dirty" lock-type)])
                              (mapv :x)
                              (assoc op :type :ok, :value))
 
                   :write (let [x (:value op)
                                order (shuffle (range n))]
                            (doseq [i order]
-                             (j/query c ["select * from dirty where id = ?" i]))
+                             (j/query c [(str "select * from dirty where id = ?" lock-type) i]))
                            (doseq [i order]
                              (j/update! c :dirty {:x x} ["id = ?" i]))
                            (assoc op :type :ok)))
@@ -76,8 +76,8 @@
   (teardown! [_ test]))
 
 (defn client
-  [n mode ti-level]
-  (Client. nil n mode ti-level))
+  [n mode lock-type ti-level]
+  (Client. nil n mode lock-type ti-level))
 
 (defn checker
   "We're looking for a failed transaction whose value became visible to some
@@ -114,11 +114,11 @@
                  gen/seq))
 
 (defn test-
-  [n mode ti-level]
+  [n mode lock-type ti-level]
   (percona/basic-test
     {:name "dirty reads"
      :concurrency 50
-     :client (client n mode ti-level)
+     :client (client n mode lock-type ti-level)
      :db percona/db
      :generator (gen/phases
                   (->> (gen/mix [reads writes])
