@@ -34,7 +34,7 @@
 (defn eval!
   "Evals a mysql string from the command line."
   [s]
-  (c/exec :mysql :-u "root" "--password=root" :-e s))
+  (meh (c/exec :mysql :-u "root" "--password=root" :-e s)))
 
 (defn conn-spec
   "jdbc connection spec for a node."
