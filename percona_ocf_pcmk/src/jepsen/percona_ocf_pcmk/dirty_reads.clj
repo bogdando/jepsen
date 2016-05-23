@@ -123,7 +123,7 @@
      :generator (gen/phases
                   (->> (gen/mix [reads writes])
                        (percona/with-nemesis)
-                       (gen/time-limit 200))
+                       (gen/time-limit 3600))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 180)
                   (gen/clients (gen/each (gen/once reads))))

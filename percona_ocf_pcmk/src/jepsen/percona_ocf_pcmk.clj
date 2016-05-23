@@ -138,11 +138,11 @@
     (gen/phases
       (->> client
            (gen/nemesis
-             (gen/seq (cycle [(gen/sleep 0)
+             (gen/seq (cycle [(gen/sleep (rand-int 20))
                               {:type :info, :f :start}
-                              (gen/sleep 10)
+                              (gen/sleep (rand-int 400))
                               {:type :info, :f :stop}])))
-           (gen/time-limit 30))
+           (gen/time-limit 1600))
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
@@ -279,7 +279,7 @@
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/stagger 1/10)
                        (with-nemesis)
-                       (gen/time-limit 200))
+                       (gen/time-limit 3600))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 180)
                   (gen/clients (gen/each (gen/once bank-read))))
