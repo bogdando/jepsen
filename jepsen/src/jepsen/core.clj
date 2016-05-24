@@ -19,6 +19,7 @@
             [clojure.pprint :refer [pprint]]
             [knossos.core :as knossos]
             [jepsen.util :as util :refer [with-thread-name
+                                          real-pmap
                                           relative-time-nanos]]
             [jepsen.os :as os]
             [jepsen.db :as db]
@@ -62,13 +63,13 @@
   and ensures all resources are correctly closed in the event of an error."
   [[sym start stop resources] & body]
   ; Start resources in parallel
-  `(let [~sym (doall (pmap (fcatch ~start) ~resources))]
+  `(let [~sym (doall (real-pmap (fcatch ~start) ~resources))]
      (when-let [ex# (some #(when (instance? Exception %) %) ~sym)]
        ; One of the resources threw instead of succeeding; shut down all which
        ; started OK and throw.
        (->> ~sym
             (remove (partial instance? Exception))
-            (pmap (fcatch ~stop))
+            (real-pmap (fcatch ~stop))
             dorun)
        (throw ex#))
 
@@ -76,19 +77,16 @@
      (try ~@body
        (finally
          ; Clean up resources
-         (dorun (pmap (fcatch ~stop) ~sym))))))
+         (dorun (real-pmap (fcatch ~stop) ~sym))))))
 
 (defn on-nodes
   "Given a test, evaluates (f test node) in parallel on each node, with that
   node's SSH connection bound."
   [test f]
   (->> (:sessions test)
-       (map (fn [[node session]]
-              (future
-                (control/with-session node session
-                  (f test node)))))
-       doall
-       (map deref)
+       (real-pmap (fn [[node session]]
+                      (control/with-session node session
+                        (f test node))))
        dorun))
 
 (defmacro with-os
@@ -170,7 +168,7 @@
                     (conj-op! test (assoc op
                                           :type :info
                                           :time  (relative-time-nanos)
-                                          :value (str "indeterminate: "
+                                          :error (str "indeterminate: "
                                                       (if (.getCause t)
                                                         (.. t getCause
                                                             getMessage)
@@ -425,7 +423,7 @@
                                            :sessions)]
 
                           (info "Run complete, writing")
-                          (when (:name test) (store/save! test))
+                          (when (:name test) (store/save-1! test))
 
                           (info "Analyzing")
                           (let [test (assoc test :results (checker/check-safe
@@ -435,5 +433,5 @@
                                                             (:history test)))]
 
                             (info "Analysis complete")
-                            (when (:name test) (store/save! test))
+                            (when (:name test) (store/save-2! test))
                           test)))))))))))))
