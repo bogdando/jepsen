@@ -84,13 +84,16 @@
 
 (defn targeter
   "Generate a target to a node, either random or a given"
+  ;TODO(bogdando) add targets by Fuel roles (hiera), like controller or compute,
+  ;targets by a Pacemaker DC node, or a Galera prim node, or a Pacemaker
+  ;multistate master/slave resource status (see elasticsearch's self-primaries)
   [node]
   (if (nil? node)
     #(rand-nth %)
     #(some #{(keyword node)} %)))
 
 (deftest factors-crashstop-test
-  "Generate SIGKILL for a given TESTPROC executed on a random or given
+  "Send SIGKILL for a given TESTPROC executed on a random or given
   TESTNODE, then restart maybe via the OS service CP"
 
   (let [proc (or (System/getenv "TESTPROC") "killme")
@@ -115,5 +118,26 @@
                                 (meh (c/su (c/exec :service proc :restart)))
                                 [:restarted-maybe proc]))
                  :generator (factor factor-wait 1 factor-time)))]
+    (is (:valid? (:results test)))
+    (report/linearizability (:linear (:results test)))))
+
+(deftest factors-freeze-test
+  "Send SIGSTOP for a given TESTPROC executed on a random or given
+  TESTNODE, then wait for the factor duration and send SIGCONT"
+
+  (let [proc (or (System/getenv "TESTPROC") "freezeme")
+        target (targeter (System/getenv "TESTNODE"))
+        test (run!
+               (assoc
+                 noop-test
+                 :nodes     nodes
+                 :name      "nemesis"
+                 :os        os/noop
+                 :db        db
+                 :client    client/noop
+                 :model     model/noop
+                 :checker   check
+                 :nemesis   (nemesis/hammer-time target proc)
+                 :generator (factor factor-wait factor-duration factor-time)))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))))
