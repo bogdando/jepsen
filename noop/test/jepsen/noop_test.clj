@@ -1,26 +1,11 @@
 (ns jepsen.noop-test
-  (:use jepsen.noop
-        jepsen.core
-        jepsen.tests
-        clojure.test
-        clojure.pprint)
-  (:require [clojure.string   :as str]
-            [clojure.tools.logging  :refer [info]]
-            [jepsen.util            :refer [meh]]
-            [jepsen.os        :as os]
-            [jepsen.db        :as db]
-            [jepsen.control   :as c]
-            [jepsen.client    :as client]
-            [jepsen.util      :as util]
-            [jepsen.checker   :as checker]
-            [jepsen.checker.timeline :as timeline]
-            [jepsen.model     :as model]
-            [jepsen.generator :as gen]
-            [jepsen.nemesis   :as nemesis]
-            [jepsen.net       :as net]
-            [jepsen.store     :as store]
-            [jepsen.report    :as report]))
+  (:require [clojure.test :refer :all]
+            [clojure.pprint :refer [pprint]]
+            [jepsen.noop :refer :all]
+            [jepsen [core :as jepsen]
+                    [report :as report]]))
 
+; A test params
 (def factor-time
   "How long to apply a factor, default 180s"
   (try
@@ -41,103 +26,44 @@
     (read-string (System/getenv "FDURATION"))
     (catch Exception e (+ 10 (rand-int 50)))))
 
+(def test-proc
+  "A process/service name for targeted tests"
+  (or (System/getenv "TESTPROC") "fooproc"))
+
+(def test-node
+  "A node name for targeted tests"
+  (System/getenv "TESTNODE"))
+
+; TODO(bogdando) add nodes filters by Fuel roles (hiera), e.g. computes,
+; by a Pacemaker DC node, multistate master/slave resource status, or
+; a Galera cluster prim node etc (see elasticsearch test's self-primaries)
 (def nodes
   ; an arbitrary list of nodes under test, like node-1, .. node-999
   [:n1 :n2 :n3])
 
-(defn factor
-  "Generator for a factor.start / factor.stop events"
-  [factor-wait factor-duration factor-time]
-  (gen/phases
-     (->> (gen/nemesis
-            (gen/seq
-              (cycle [(gen/sleep factor-wait)
-                      {:type :info :f :start}
-                      (gen/sleep factor-duration)
-                      {:type :info :f :stop}])))
-          (gen/time-limit factor-time))
-     (gen/log "Stopped")))
+(defn run-set-test!
+  "Runs a test around set creation and dumps some results to the report/ dir"
+  [t]
+  (let [test (jepsen/run! t)]
+    (or (is (:valid? (:results test)))
+        (println (:error (:results test))))
+    (report/to (str "report/" (:name test) "/history.edn")
+               (pprint (:history test)))
+    (report/to (str "report/" (:name test) "/set.edn")
+               (pprint (:set (:results test))))))
 
-(def check
-  "A noop checker of a history. Enable timeline/perf maybe?"
-  (checker/compose {;:html   timeline/html
-                    ;:perf   (checker/perf)
-                    :linear checker/unbridled-optimism}))
-
+; Executable test cases
 (deftest factors-netpart-test
-  "Split nodes into random halved network partitions"
-  (let [test (run!
-               (assoc
-                 noop-test
-                 :nodes     nodes
-                 :name      "nemesis"
-                 :os        os/noop
-                 :db        db
-                 :client    client/noop
-                 :model     model/noop
-                 :checker   check
-                 :net       net/iptables
-                 :nemesis   (nemesis/partition-random-halves)
-                 :generator (factor factor-wait factor-duration factor-time)))]
-    (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
-
-(defn targeter
-  "Generate a target to a node, either random or a given"
-  ;TODO(bogdando) add targets by Fuel roles (hiera), like controller or compute,
-  ;targets by a Pacemaker DC node, or a Galera prim node, or a Pacemaker
-  ;multistate master/slave resource status (see elasticsearch's self-primaries)
-  [node]
-  (if (nil? node)
-    #(rand-nth %)
-    #(some #{(keyword node)} %)))
+  (run-set-test! (create-factors-netpart nodes
+                                         factor-time factor-wait
+                                         factor-duration)))
 
 (deftest factors-crashstop-test
-  "Send SIGKILL for a given TESTPROC executed on a random or given
-  TESTNODE, then restart maybe via the OS service CP"
-
-  (let [proc (or (System/getenv "TESTPROC") "killme")
-        target (targeter (System/getenv "TESTNODE"))
-        test (run!
-               (assoc
-                 noop-test
-                 :nodes     nodes
-                 :name      "nemesis"
-                 :os        os/noop
-                 :db        db
-                 :client    client/noop
-                 :model     model/noop
-                 :checker   check
-                 :nemesis   (nemesis/node-start-stopper
-                              target
-                              (fn start [test node]
-                                (meh (c/su (c/exec :killall :-9 proc)))
-                                [:killed proc])
-                              (fn stop [test node]
-                                (info node (str "starting " proc))
-                                (meh (c/su (c/exec :service proc :restart)))
-                                [:restarted-maybe proc]))
-                 :generator (factor factor-wait 1 factor-time)))]
-    (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
+  (run-set-test! (create-factors-crashstop nodes
+                                           factor-time factor-wait 1
+                                           test-proc test-node)))
 
 (deftest factors-freeze-test
-  "Send SIGSTOP for a given TESTPROC executed on a random or given
-  TESTNODE, then wait for the factor duration and send SIGCONT"
-
-  (let [proc (or (System/getenv "TESTPROC") "freezeme")
-        target (targeter (System/getenv "TESTNODE"))
-        test (run!
-               (assoc
-                 noop-test
-                 :nodes     nodes
-                 :name      "nemesis"
-                 :os        os/noop
-                 :db        db
-                 :client    client/noop
-                 :model     model/noop
-                 :checker   check
-                 :nemesis   (nemesis/hammer-time target proc)
-                 :generator (factor factor-wait factor-duration factor-time)))]
-    (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
+  (run-set-test! (create-factors-freeze nodes
+                                        factor-time factor-wait factor-duration
+                                        test-proc test-node)))
