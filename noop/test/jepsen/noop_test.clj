@@ -17,7 +17,9 @@
             [jepsen.store     :as store]
             [jepsen.report    :as report]))
 
-(deftest factors-test
+(deftest factors-netpart-test
+  "For a 3 min long, generates random halves split network partitions with a
+  random start delay of 5 to 20 seconds and duration of 10 to 60 seconds"
   (let [test (run!
                (assoc
                  noop-test
@@ -25,27 +27,27 @@
                  :nodes     [:n1 :n2 :n3]
                  :name      "nemesis"
                  :os        os/noop
-                 ;:db        db/noop
                  :db        db
                  :client    client/noop
                  :model     model/noop
-                 :checker   (checker/compose {;:html   timeline/html
-                                              ;:perf   (checker/perf)
-                                              :linear checker/unbridled-optimism})
-                 ; pick a mode you want?
+                 :checker   (checker/compose
+                              {;:html   timeline/html
+                               ;:perf   (checker/perf)
+                               :linear checker/unbridled-optimism})
+                 ; pick modes you want
                  :net       net/iptables
-                 ; pick a mode you want
-                 ;:nemesis   nemesis/noop
                  :nemesis   (nemesis/partition-random-halves)
-                 ; create a generator for factor(s).start / stop
-                 ;:generator gen/void
+                 ; create a generator for a factor.start / stop
                  :generator (gen/phases
                               (->> (gen/nemesis
                                      (gen/seq
-                                       (cycle [(gen/sleep 5)
+                                       (cycle [(gen/sleep (+ 5 (rand-int 15)))
                                                {:type :info :f :start}
-                                               (gen/sleep 20)
+                                               (gen/sleep (+ 10 (rand-int 50)))
                                                {:type :info :f :stop}])))
-                                   (gen/time-limit 100)))))]
+                                   (gen/time-limit 180))
+                               (gen/nemesis
+                                 (gen/once {:type :info, :f :stop}))
+                               (gen/log "Stopped"))))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))))
