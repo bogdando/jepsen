@@ -21,68 +21,90 @@
             [jepsen.store     :as store]
             [jepsen.report    :as report]))
 
+(def factor-time
+  "How long to apply a factor, default 180s"
+  (try
+    (read-string (System/getenv "FTIME"))
+    (catch Exception e 180)))
+
+(def factor-wait
+  "How long to wait for a first start (and before the next start)
+  of the factor being applied, default from 5 to 20s"
+  (try
+    (read-string (System/getenv "FWAIT"))
+    (catch Exception e (+ 5 (rand-int 15)))))
+
+(def factor-duration
+  "Duration of the factor being applied before stopped within an
+  iteration, default from 10 to 60s"
+  (try
+    (read-string (System/getenv "FDURATION"))
+    (catch Exception e (+ 10 (rand-int 50)))))
+
+(def nodes
+  ; an arbitrary list of nodes under test, like node-1, .. node-999
+  [:n1 :n2 :n3])
+
+(defn factor
+  "Generator for a factor.start / factor.stop events"
+  [factor-wait factor-duration factor-time]
+  (gen/phases
+     (->> (gen/nemesis
+            (gen/seq
+              (cycle [(gen/sleep factor-wait)
+                      {:type :info :f :start}
+                      (gen/sleep factor-duration)
+                      {:type :info :f :stop}])))
+          (gen/time-limit factor-time))
+     (gen/log "Stopped")))
+
+(def check
+  "A noop checker of a history. Enable timeline/perf maybe?"
+  (checker/compose {;:html   timeline/html
+                    ;:perf   (checker/perf)
+                    :linear checker/unbridled-optimism}))
+
 (deftest factors-netpart-test
-  "For a 3 min long, generate random halves split network partitions with a
-  random start delay of 5 to 20 seconds and duration of 10 to 60 seconds"
+  "Split nodes into random halved network partitions"
   (let [test (run!
                (assoc
                  noop-test
-                 ; an arbitrary list of nodes, like node-1, .. node-999
-                 :nodes     [:n1 :n2 :n3]
+                 :nodes     nodes
                  :name      "nemesis"
                  :os        os/noop
                  :db        db
                  :client    client/noop
                  :model     model/noop
-                 :checker   (checker/compose
-                              {;:html   timeline/html
-                               ;:perf   (checker/perf)
-                               :linear checker/unbridled-optimism})
-                 ; pick modes you want
+                 :checker   check
                  :net       net/iptables
                  :nemesis   (nemesis/partition-random-halves)
-                 ; create a generator for a factor.start / stop
-                 :generator (gen/phases
-                              (->> (gen/nemesis
-                                     (gen/seq
-                                       (cycle [(gen/sleep (+ 5 (rand-int 15)))
-                                               {:type :info :f :start}
-                                               (gen/sleep (+ 10 (rand-int 50)))
-                                               {:type :info :f :stop}])))
-                                   (gen/time-limit 180))
-                              (gen/nemesis
-                                (gen/once {:type :info, :f :stop}))
-                              (gen/log "Stopped"))))]
+                 :generator (factor factor-wait factor-duration factor-time)))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))))
 
+(defn targeter
+  "Generate a target to a node, either random or a given"
+  [node]
+  (if (nil? node)
+    #(rand-nth %)
+    #(some #{(keyword node)} %)))
+
 (deftest factors-crashstop-test
-  "For a 3 min long, generate killall -9 events for a given TESTPROC env var
-  executed on a given TESTNODE, or pick a random node, then restart (maybe)
-  via the service CP, repeat with a random delay of 5 to 20 seconds"
-  (defn targeter
-    [node]
-    (if (nil? node)
-      #(rand-nth %)
-      #(some #{(keyword node)} %)))
+  "Generate SIGKILL for a given TESTPROC executed on a random or given
+  TESTNODE, then restart maybe via the OS service CP"
 
   (let [proc (or (System/getenv "TESTPROC") "killme")
         target (targeter (System/getenv "TESTNODE"))
         test (run!
                (assoc
                  noop-test
-                 ; an arbitrary list of nodes, like node-1, .. node-999
-                 :nodes     [:n1 :n2 :n3]
+                 :nodes     nodes
                  :name      "nemesis"
                  :os        os/noop
                  :db        db
                  :client    client/noop
                  :model     model/noop
-                 :checker   (checker/compose
-                              {;:html   timeline/html
-                               ;:perf   (checker/perf)
-                               :linear checker/unbridled-optimism})
-                 ; pick modes you want
+                 :checker   check
                  :nemesis   (nemesis/node-start-stopper
                               target
                               (fn start [test node]
@@ -92,15 +114,6 @@
                                 (info node (str "starting " proc))
                                 (meh (c/su (c/exec :service proc :restart)))
                                 [:restarted-maybe proc]))
-                 ; create a generator for a factor.start only
-                 :generator (gen/phases
-                              (->> (gen/nemesis
-                                     (gen/seq
-                                       (cycle [(gen/sleep (+ 5 (rand-int 15)))
-                                               {:type :info :f :start}
-                                               (gen/sleep 1)
-                                               {:type :info :f :stop}])))
-                                   (gen/time-limit 180))
-                              (gen/log "Stopped"))))]
+                 :generator (factor factor-wait 1 factor-time)))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))))
