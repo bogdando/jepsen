@@ -70,19 +70,25 @@
           (finally
             (meh (rmq/close ~ch))))))
 
+(defn InitQueue
+  "(Re-)initialize a queue. A disposable cluster allows queues to be lost, it
+  shall be recreated then"
+  [conn]
+  (with-ch [ch conn]
+    ; Initialize queue
+    (lq/declare ch queue
+                  {:durable     false
+                   :auto-delete false
+                   :exclusive   false})))
+
 (defrecord QueueClient [conn]
   client/Client
   (setup! [_ test node]
     (let [conn (rmq/connect
                  {:host (name node)
                   :username "test" :password "test"
-                  :automatically-recover false})]
-      (with-ch [ch conn]
-        ; Initialize queue
-        (lq/declare ch queue
-                    {:durable     false
-                     :auto-delete false
-                     :exclusive   false}))
+                  :automatically-recover true})]
+      (InitQueue conn)
 
       ; Return client
       (QueueClient. conn)))
@@ -96,7 +102,8 @@
     (meh (rmq/close conn)))
 
   (invoke! [this test op]
-    (let [fail (if (= :drain (:f op))
+    (let [fail (if (or (= :drain (:f op))
+                       (= :dequeue (:f op)))
                  :fail
                  :info)]
       (try+ (with-ch [ch conn]
@@ -138,16 +145,23 @@
         (assoc op :type fail :value :timeout))
 
       (catch AlreadyClosedException e
+        (meh (InitQueue conn))
         (assoc op :type fail :value :channel-closed))
+
+      (catch ShutdownSignalException e
+        (meh (InitQueue conn))
+        (assoc op :type fail :value (:cause e)))
 
       (catch (and (instance? clojure.lang.ExceptionInfo %)) e
         (assoc op :type fail :value (:cause e)))
 
       (catch (and (:errorCode %) (:message %)) e
+        (meh (InitQueue conn))
         (assoc op :type fail :value (:cause e)))
 
       (catch Exception e
-            (assoc op :type fail :value (:cause e)))))))
+        (meh (InitQueue conn))
+        (assoc op :type fail :value (:cause e)))))))
 
 (defn queue-client [] (QueueClient. nil))
 
