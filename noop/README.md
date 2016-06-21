@@ -25,6 +25,18 @@ lein test :only jepsen.noop-test/factors-netpart-test
 
 TODO: add mode modes, create filters for subsets of nodes by misc criteria
 
+## How-to run tests against custom node names/root password
+
+By default, Jepsen hardcodes node names as n1, n2, ..n5 with root/root creds.
+Define custom `nodes-root-pass` and `nodes` list in the `noop_test.clj` file.
+
+TODO: read from a config file as well
+
+To issue a basic SSH check, use
+```
+lein test :only jepsen.noop-test/ssh-test
+```
+
 ## License
 
 Copyright © 2016 FIXME

@@ -1,11 +1,19 @@
 (ns jepsen.noop-test
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer [pprint]]
+            [clojure.string :as str]
             [jepsen.noop :refer :all]
             [jepsen [core :as jepsen]
-                    [report :as report]]))
+                    [report :as report]
+                    [tests :as tst]
+                    [os :as os]
+                    [db :as db]
+                    [store :as store]
+                    [control :as control]]))
 
 ; A test params
+(def nodes-root-pass "root")
+
 (def factor-time
   "How long to apply a factor, default 180s"
   (try
@@ -36,15 +44,20 @@
 
 ; TODO(bogdando) add nodes filters by Fuel roles (hiera), e.g. computes,
 ; by a Pacemaker DC node, multistate master/slave resource status, or
-; a Galera cluster prim node etc (see elasticsearch test's self-primaries)
+; a Galera cluster prim node etc (see elasticsearch test's self-primaries).
+; Make those to be read from a config file as an option.
 (def nodes
   ; an arbitrary list of nodes under test, like node-1, .. node-999
-  [:n1 :n2 :n3])
+  [:n1 :n2 :n3 :n4 :n5])
+
+(defmacro with-pass [ & body ]
+  `(binding [jepsen.control/*password* nodes-root-pass]
+     ~@body))
 
 (defn run-set-test!
   "Runs a test around set creation and dumps some results to the report/ dir"
   [t]
-  (let [test (jepsen/run! t)]
+  (let [test (with-pass (jepsen/run! t))]
     (or (is (:valid? (:results test)))
         (println (:error (:results test))))
     (report/to (str "report/" (:name test) "/history.edn")
@@ -67,3 +80,60 @@
   (run-set-test! (create-factors-freeze nodes
                                         factor-time factor-wait factor-duration
                                         test-proc test-node)))
+
+;NOTE(bogdando) reused it from jepsen.core ssh-test, although reworked hardcodes
+(deftest ssh-test
+  (let [os-startups  (atom {})
+        os-teardowns (atom {})
+        db-startups  (atom {})
+        db-teardowns (atom {})
+        db-primaries (atom [])
+        nonce        (rand-int Integer/MAX_VALUE)
+        nonce-file   "/tmp/jepsen-test"
+        ;override hardcoded control.net/hosts-map by the given list of nodes
+        hosts-map    (into {} (map hash-map nodes (map name nodes)))
+        test (with-pass
+                  (jepsen/run! (assoc tst/noop-test
+                          :name      "ssh test"
+                          :nodes nodes
+                          :os (reify os/OS
+                                (setup! [_ test node]
+                                  (swap! os-startups assoc node
+                                         (control/exec :hostname)))
+
+                                (teardown! [_ test node]
+                                  (swap! os-teardowns assoc node
+                                         (control/exec :hostname))))
+
+                          :db (reify db/DB
+                                (setup! [_ test node]
+                                  (swap! db-startups assoc node
+                                         (control/exec :hostname))
+                                  (control/exec :echo nonce :> nonce-file))
+
+                                (teardown! [_ test node]
+                                  (swap! db-teardowns assoc node
+                                         (control/exec :hostname))
+                                  (control/exec :rm nonce-file))
+
+                                db/Primary
+                                (setup-primary! [_ test node]
+                                  (swap! db-primaries conj
+                                         (control/exec :hostname)))
+
+                                db/LogFiles
+                                (log-files [_ test node]
+                                  [nonce-file])))))]
+
+    (is (:valid? (:results test)))
+    (is (apply =
+               (str nonce)
+               (->> test
+                    :nodes
+                    (map #(->> (store/path test (name %)
+                                           (str/replace nonce-file #".+/" ""))
+                               slurp
+                               str/trim)))))
+    ;reworked the original magic to fit the custom list of nodes undet test
+    (is (= @os-startups @os-teardowns @db-startups @db-teardowns hosts-map))
+    (is (= @db-primaries [(first (map hosts-map nodes))]))))

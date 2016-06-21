@@ -62,7 +62,7 @@
      (gen/log "Stopped")))
 
 (def check
-  "A noop checker of a history. Enable perf maybe"
+  "A noop checker of a history. Enable perf maybe?"
   (checker/compose {;:perf   (checker/perf)
                     :linear checker/unbridled-optimism}))
 
@@ -84,7 +84,8 @@
           :client    client/noop
           :model     model/noop
           :nodes     nodes
-          :check     check
+          ; seems not working with custom node names!
+          :check     nil
           :generator (factor factor-wait factor-duration factor-time)}
          opts))
 
