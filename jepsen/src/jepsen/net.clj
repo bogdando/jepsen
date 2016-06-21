@@ -29,7 +29,8 @@
     (heal! [net test]
       (on-many (:nodes test) (su
                                (exec :iptables :-F :-w)
-                               (exec :iptables :-X :-w))))
+                               (exec :iptables :-X :-w)
+                               (exec :cat "/etc/iptables.rules" :> :iptables-restore))))
 
     (slow! [net test]
       (on-many (:nodes test)

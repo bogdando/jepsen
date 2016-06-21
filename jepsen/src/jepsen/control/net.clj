@@ -78,4 +78,5 @@
   []
   (su
     (exec :iptables :-F)
-    (exec :iptables :-X)))
+    (exec :iptables :-X)
+    (exec :cat "/etc/iptables.rules" :> :iptables-restore)))
