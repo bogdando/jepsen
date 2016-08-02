@@ -86,7 +86,7 @@
   (setup! [_ test node]
     (let [conn (rmq/connect
                  {:host (name node)
-                  :username "test" :password "test"
+                  :username "nova" :password "B7A0SxdbEur6xNTwg1F5IjPx"
                   :automatically-recover true})]
       (InitQueue conn)
 
@@ -173,7 +173,7 @@
   (setup! [_ test node]
     (let [conn (rmq/connect
                  {:host (name node)
-                  :username "test" :password "test"
+                  :username "nova" :password "B7A0SxdbEur6xNTwg1F5IjPx"
                   :automatically-recover false})]
       (with-ch [ch conn]
         (lq/declare ch "jepsen.semaphore"

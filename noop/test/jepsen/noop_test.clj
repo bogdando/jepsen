@@ -48,9 +48,11 @@
 ; Make those to be read from a config file as an option.
 (def nodes
   ; an arbitrary list of nodes under test, like node-1, .. node-999
-  [:node-3.test.domain.local
-   :node-2.test.domain.local
-   :node-1.test.domain.local])
+  [:node-1.domain.tld
+   :node-2.domain.tld
+   :node-4.domain.tld
+   :node-5.domain.tld
+   :node-6.domain.tld])
 
 (defmacro with-pass [ & body ]
   `(binding [jepsen.control/*password* nodes-root-pass]

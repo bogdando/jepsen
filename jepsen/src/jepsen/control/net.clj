@@ -4,11 +4,11 @@
   (:use jepsen.control)
   (:require [clojure.string :as str]))
 
-(def hosts-map {:n1 "n1"
-              :n2 "n2"
-              :n3 "n3"
-              :n4 "n4"
-              :n5 "n5"
+(def hosts-map {:n1 "node-1.domain.tld"
+              :n2 "node-2.domain.tld"
+              :n3 "node-4.domain.tld"
+              :n4 "node-5.domain.tld"
+              :n5 "node-6.domain.tld"
               })
 
 (def small-partition-set #{(:n1 hosts-map) (:n2 hosts-map)})

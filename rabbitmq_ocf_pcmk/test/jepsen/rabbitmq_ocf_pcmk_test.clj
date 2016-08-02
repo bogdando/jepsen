@@ -47,6 +47,7 @@
                (assoc
                  noop-test
                  :name       "rabbitmq-simple-partition"
+                 :nodes     ["node-1.domain.tld" "node-2.domain.tld" "node-4.domain.tld" "node-5.domain.tld" "node-6.domain.tld"]
                  :db         db
                  :client     (queue-client)
                  :nemesis    (nemesis/partition-random-halves)
@@ -54,6 +55,7 @@
                  :checker    (checker/compose
                                {:queue       checker/queue
                                 :total-queue checker/total-queue})
+                 :ssh        {:username "root", :private-key-path "~/.ssh/id_rsa"}
                  :generator  (gen/phases
                                (->> (gen/queue)
                                     (gen/delay 1/10)
