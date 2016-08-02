@@ -70,7 +70,10 @@ cd pacemaker-cluster-ocf-vagrant
 ```
 
 Get the Jepsen fork and prepare nodes for Jepsen tests.
-NOTE: it allows password based root login for the env nodes!
+NOTE: it allows password based root login for the env nodes, sets
+default iptables policy for INPUT to accept and makes RabbitMQ
+listen on all interfaces. All together, it opens a pretty big security
+beach.
 ```
 ./vagrant_script/conf_jepsen.sh fuel
 cat /var/lib/cobbler/cobbler_hosts >> /etc/hosts
@@ -78,13 +81,33 @@ for i in $(cat /var/lib/cobbler/cobbler_hosts | awk '{print $2}'); do
   ssh-keyscan -t rsa $i >> /root/.ssh/known_hosts
   ssh $i "sed -i '/PasswordAuthentication/d' /etc/ssh/sshd_config"
   ssh $i service ssh restart
+  ssh $i iptables -P INPUT ACCEPT
+  ssh $i sed -i 's/^NODE_IP_ADDRESS/#NODE_IP_ADDRESS/' /etc/rabbitmq/rabbitmq-env.conf
 done
 ```
 
-Run tests as:
+Log into any controller, switch RabbitMQ to port 5672 and restart it:
+```
+crm_resource --resource p_rabbitmq-server --set-parameter node_port --parameter-value 5672
+crm resource restart p_rabbitmq-server
+```
+
+Go to /jepsen/jepsen directory on master node and apply changes from
+the commit [7295cc5c13d5c393def8393af4d28e54a9e432ed]
+(https://github.com/dmitrymex/jepsen/commit/7295cc5c13d5c393def8393af4d28e54a9e432ed).
+The commit hardcodes environment-specific values (hostnames and
+credentials), so you will have to apply it manually.
+
+Run SSH tests as:
 ```
 PURGE=true ./vagrant_script/lein_test.sh noop ssh-test
 ```
+
+To run the RabbitMQ tests, execute
+```
+PURGE=true ./vagrant_script/lein_test.sh rabbitmq_ocf_pcmk rabbit-test
+```
+
 Note, use the PURGE for the very first run. It shall produce a custom
 Jepsen jar build and relaunch the jepsen with lein container. You can skip this
 step for later runs as well. Also see the usage examples above, but prefixed
