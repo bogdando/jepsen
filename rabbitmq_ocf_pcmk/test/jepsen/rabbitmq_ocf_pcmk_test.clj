@@ -6,7 +6,9 @@
         clojure.pprint)
   (:require [clojure.string   :as str]
             [jepsen.util      :as util]
-            [jepsen.os.debian :as debian]
+            [jepsen.os        :as os]
+            [jepsen.control   :as control]
+            [jepsen.tests     :as tst]
             [jepsen.checker   :as checker]
             [jepsen.checker.timeline :as timeline]
             [jepsen.model     :as model]
@@ -15,12 +17,33 @@
             [jepsen.store     :as store]
             [jepsen.report    :as report]))
 
+(def nodes
+  "A list of cluster nodes under test"
+  (try
+    (map keyword
+      (str/split
+        (read-string (System/getenv "NODES")) #"\s"))
+    (catch Exception e [:n1 :n2 :n3 :n4 :n5])))
+
 (deftest mutex-test
-  (let [test (run!
+  (let [os-startups  (atom {})                                                                                                                        
+        os-teardowns (atom {})
+        ;override hardcoded control.net/hosts-map by the given list of nodes
+        hosts-map    (into {} (map hash-map nodes (map name nodes)))
+        test (run!
                (assoc
-                 noop-test
+                 tst/noop-test
                  :name      "rabbitmq-mutex"
-                 :db        db
+                 :nodes     nodes
+                 :os (reify os/OS
+                       (setup! [_ test node]
+                         (swap! os-startups assoc node
+                               (control/exec :hostname)))
+
+                       (teardown! [_ test node]
+                         (swap! os-teardowns assoc node
+                               (control/exec :hostname))))
+                 :db db
                  :client    (mutex)
                  :checker   (checker/compose {:html   timeline/html
                                               :linear checker/linearizable})
@@ -40,14 +63,29 @@
                                             {:type :info :f :stop}])))
                                 (gen/time-limit 500)))))]
     (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
+    (report/linearizability (:linear (:results test)))
+    ;reworked the original magic to fit the custom list of nodes undet test
+    (is (= @os-startups @os-teardowns hosts-map))))
 
 (deftest rabbit-test
-  (let [test (run!
+  (let [os-startups  (atom {})                                                                                                                        
+        os-teardowns (atom {})
+        ;override hardcoded control.net/hosts-map by the given list of nodes
+        hosts-map    (into {} (map hash-map nodes (map name nodes)))
+        test (run!
                (assoc
-                 noop-test
+                 tst/noop-test
                  :name       "rabbitmq-simple-partition"
-                 :db         db
+                 :nodes      nodes
+                 :os (reify os/OS
+                       (setup! [_ test node]
+                         (swap! os-startups assoc node
+                               (control/exec :hostname)))
+
+                       (teardown! [_ test node]
+                         (swap! os-teardowns assoc node
+                               (control/exec :hostname))))                 
+                 :db db
                  :client     (queue-client)
                  :nemesis    (nemesis/partition-random-halves)
                  :model      (model/unordered-queue)
@@ -72,4 +110,6 @@
                                  (gen/each
                                    (gen/once {:type :invoke
                                               :f    :drain}))))))]
-    (is (:valid? (:results test)))))
+    (is (:valid? (:results test)))
+    ;reworked the original magic to fit the custom list of nodes undet test
+    (is (= @os-startups @os-teardowns hosts-map))))
