@@ -28,8 +28,6 @@
 (deftest mutex-test
   (let [os-startups  (atom {})                                                                                                                        
         os-teardowns (atom {})
-        nonce        (rand-int Integer/MAX_VALUE)
-        nonce-file   "/tmp/jepsen-test"
         ;override hardcoded control.net/hosts-map by the given list of nodes
         hosts-map    (into {} (map hash-map nodes (map name nodes)))
         test (run!
@@ -66,22 +64,12 @@
                                 (gen/time-limit 500)))))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))
-    (is (apply =
-               (str nonce)
-               (->> test
-                    :nodes
-                    (map #(->> (store/path test (name %)
-                                           (str/replace nonce-file #".+/" ""))
-                               slurp
-                               str/trim)))))
     ;reworked the original magic to fit the custom list of nodes undet test
     (is (= @os-startups @os-teardowns hosts-map))))
 
 (deftest rabbit-test
   (let [os-startups  (atom {})                                                                                                                        
         os-teardowns (atom {})
-        nonce        (rand-int Integer/MAX_VALUE)
-        nonce-file   "/tmp/jepsen-test"
         ;override hardcoded control.net/hosts-map by the given list of nodes
         hosts-map    (into {} (map hash-map nodes (map name nodes)))
         test (run!
@@ -123,13 +111,5 @@
                                    (gen/once {:type :invoke
                                               :f    :drain}))))))]
     (is (:valid? (:results test)))
-    (is (apply =
-               (str nonce)
-               (->> test
-                    :nodes
-                    (map #(->> (store/path test (name %)
-                                           (str/replace nonce-file #".+/" ""))
-                               slurp
-                               str/trim)))))
     ;reworked the original magic to fit the custom list of nodes undet test
     (is (= @os-startups @os-teardowns hosts-map))))
